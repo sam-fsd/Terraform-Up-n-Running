@@ -76,4 +76,3 @@ server_count  = 1  # Will increase in later phases
 ```
 
 ---
-*Each phase will have its own detailed implementation in separate directories.*
