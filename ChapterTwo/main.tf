@@ -4,10 +4,11 @@ provider "aws" {
 }
 
 # Define the port variable for the web server
+# Define the port variable for the web server
 variable "server_port" {
   description = "The port the server will use for HTTP requests"
   type        = number
-  default     = 8080
+  default     = 8080  # Non-standard port to avoid conflicts
 }
 
 # Create a single EC2 instance
@@ -49,10 +50,12 @@ resource "aws_launch_configuration" "example" {
   }
 }
 
+# Get information about the default VPC
 data "aws_vpc" "default" {
-  default = true
+  default = true  # Find the default VPC in the region
 }
 
+# Get all subnets in the default VPC
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
@@ -60,18 +63,86 @@ data "aws_subnets" "default" {
   }
 }
 
+# Auto Scaling Group to manage multiple instances
 resource "aws_autoscaling_group" "example" {
   launch_configuration = aws_launch_configuration.example.name
-  vpc_zone_identifier = data.aws_subnets.default.ids
+  vpc_zone_identifier = data.aws_subnets.default.ids  # Deploy across all subnets
 
-  min_size             = 2
-  max_size             = 10
+  target_group_arns = [aws_lb_target_group.asg.arn]  # Register instances with load balancer
+  health_check_type = "ELB"  # Use load balancer health checks
 
-tag {
-  key                 = "Name"
-  value               = "terraform-asg-example"
-  propagate_at_launch  = true
+  min_size             = 2   # Minimum 2 instances
+  max_size             = 10  # Maximum 10 instances
+
+  # Tag all instances in the ASG
+  tag {
+    key                 = "Name"
+    value               = "terraform-asg-example"
+    propagate_at_launch  = true
+  }
 }
+
+# Application Load Balancer to distribute traffic
+resource "aws_lb" "example" {
+  name               = "terraform-asg-example"
+  load_balancer_type = "application"  # Layer 7 load balancer
+  subnets            = data.aws_subnets.default.ids  # Deploy across all subnets
+  security_groups    = [aws_security_group.alb.id]   # Attach ALB security group
+}
+
+# Load balancer listener for HTTP traffic
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.example.arn
+  port              = 80    # Standard HTTP port
+  protocol          = "HTTP"
+
+  # By default, return a simple 404 page
+  default_action {
+    type = "fixed-response"
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "404: page not found"
+      status_code  = 404
+    }
+  }
+}
+
+# Target group for the Auto Scaling Group
+resource "aws_lb_target_group" "asg" {
+  name     = "terraform-asg-example"
+  port     = var.server_port  # Port 8080
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default.id
+
+  # Health check configuration
+  health_check {
+    path     = "/"              # Health check endpoint
+    protocol = "HTTP"
+    matcher  = "200"            # Expect HTTP 200 response
+    interval = 15               # Check every 15 seconds
+    timeout  = 3                # Wait 3 seconds for response
+    healthy_threshold   = 2     # 2 successful checks = healthy
+    unhealthy_threshold = 2     # 2 failed checks = unhealthy
+  }
+}
+
+# Listener rule to forward all traffic to the target group
+resource "aws_lb_listener_rule" "asg" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 100  # Rule priority (lower = higher priority)
+
+  # Match all paths
+  condition {
+    path_pattern {
+      values = ["*"]  # Forward all requests
+    }
+  }
+
+  # Forward to target group
+  action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.asg.arn
+  }
 }
 
 # Security group to allow HTTP traffic
@@ -87,8 +158,29 @@ resource "aws_security_group" "instance" {
   }
 }
 
-# Output the public IP address of the instance
-output "public_ip" {
-  value       = aws_instance.example.public_ip
-  description = "The public IP address of the web server"
+# Security group for the Application Load Balancer
+resource "aws_security_group" "alb" {
+  name = "terraform-example-alb"
+
+  # Allow inbound HTTP requests from anywhere
+  ingress {
+    from_port   = 80           # Standard HTTP port
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # Allow from any IP address
+  }
+
+  # Allow all outbound requests (needed for health checks)
+  egress {
+    from_port   = 0            # All ports
+    to_port     = 0
+    protocol    = "-1"         # All protocols
+    cidr_blocks = ["0.0.0.0/0"]  # To any IP address
+  }
+}
+
+# Output the load balancer DNS name
+output "alb_dns_name" {
+  value       = aws_lb.example.dns_name
+  description = "The domain name of the load balancer"
 }
