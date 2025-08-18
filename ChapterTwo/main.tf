@@ -11,42 +11,32 @@ variable "server_port" {
   default     = 8080  # Non-standard port to avoid conflicts
 }
 
-# Create a single EC2 instance
-resource "aws_instance" "example" {
-  ami           = "ami-0fb653ca2d3203ac1"  # Ubuntu 20.04 LTS
-  instance_type = "t2.micro"                # Free tier eligible
-  vpc_security_group_ids = [aws_security_group.instance.id]
-
-  # Startup script to create a simple web server
-  user_data = <<-EOF
-        #!/bin/bash
-        echo "Hello, World" > index.xhtml
-        nohup busybox httpd -f -p ${var.server_port} &
-        EOF
-  user_data_replace_on_change = true
-
-  # Tag the instance for identification
-  tags = {
-    Name = "terraform-example-instance"
-  }
-}
-
 # Launch configuration for Auto Scaling Group (used in later chapters)
-resource "aws_launch_configuration" "example" {
+resource "aws_launch_template" "example" {
   image_id = "ami-0fb653ca2d3203ac1"  # Ubuntu 20.04 LTS
   instance_type = "t2.micro"           # Free tier eligible
-  security_groups = [aws_security_group.instance.id]
+  vpc_security_group_ids = [aws_security_group.instance.id]
 
-  # Same startup script as the single instance
-  user_data = <<-EOF
+  # Same startup script as the single instance with base64encoding(required for launch template)
+  user_data = base64encode(<<-EOF
         #!/bin/bash
-        echo "Hello, World" > index.xhtml
-        nohup busybox httpd -f -p ${var.server_port} &
-        EOF
+        mkdir -p /var/www/html
+        echo "Hello, World" > /var/www/html/index.html
+        nohup busybox httpd -p ${var.server_port} -h /var/www/html &
+      EOF
+  )
 
   # Required when using a launch configuration with an auto scaling group.
   lifecycle {
     create_before_destroy = true
+  }
+
+  # optional, but recommended to tag instances on launch
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "example"
+    }
   }
 }
 
@@ -65,7 +55,11 @@ data "aws_subnets" "default" {
 
 # Auto Scaling Group to manage multiple instances
 resource "aws_autoscaling_group" "example" {
-  launch_configuration = aws_launch_configuration.example.name
+  launch_template {
+    id      = aws_launch_template.example.id
+    version = "$Latest"
+  }
+
   vpc_zone_identifier = data.aws_subnets.default.ids  # Deploy across all subnets
 
   target_group_arns = [aws_lb_target_group.asg.arn]  # Register instances with load balancer
