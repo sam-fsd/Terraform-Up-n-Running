@@ -12,6 +12,8 @@ This repository contains my follow-along projects and exercises from **"Terrafor
 - **Best practices** - Security, modularity, and maintainability
 - **Real-world scenarios** - Practical implementations that mirror production environments
 
+***NOTE: Some of the examples in the book use resources that have been deprecated, but my examples provide current solutions to those nuances.***
+
 ## 📖 Book Chapters & Projects
 
 ### Chapter 2: Getting Started with Terraform
