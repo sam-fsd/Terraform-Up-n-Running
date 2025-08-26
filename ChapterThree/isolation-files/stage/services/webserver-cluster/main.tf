@@ -5,14 +5,11 @@ resource "aws_launch_template" "example" {
   vpc_security_group_ids = [aws_security_group.instance.id]
 
   # Same startup script as the single instance with base64encoding(required for launch template)
-  user_data = base64encode(<<-EOF
-        #!/bin/bash
-        echo "Hello, World" >> index.xhtml
-        echo "${data.terraform_remote_state.db.outputs.address}" >> index.xhtml
-        echo "${data.terraform_remote_state.db.outputs.port}" >> index.xhtml
-        nohup busybox httpd -f -p ${var.server_port} &
-      EOF
-  )
+  user_data = base64encode(templatefile("user-data.sh", {
+    server_port = var.server_port
+    db_address  = data.terraform_remote_state.db.outputs.address
+    db_port     = data.terraform_remote_state.db.outputs.port
+  }))
 
   # Required when using a launch configuration with an auto scaling group.
   lifecycle {
