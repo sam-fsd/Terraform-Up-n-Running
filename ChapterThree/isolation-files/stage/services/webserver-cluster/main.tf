@@ -7,9 +7,10 @@ resource "aws_launch_template" "example" {
   # Same startup script as the single instance with base64encoding(required for launch template)
   user_data = base64encode(<<-EOF
         #!/bin/bash
-        mkdir -p /var/www/html
-        echo "Hello, World" > /var/www/html/index.html
-        nohup busybox httpd -p ${var.server_port} -h /var/www/html &
+        echo "Hello, World" >> index.xhtml
+        echo "${data.terraform_remote_state.db.outputs.address}" >> index.xhtml
+        echo "${data.terraform_remote_state.db.outputs.port}" >> index.xhtml
+        nohup busybox httpd -f -p ${var.server_port} &
       EOF
   )
 
@@ -160,12 +161,30 @@ resource "aws_security_group" "alb" {
   }
 }
 
+# Configure Terraform to use S3 backend for remote state storage
+# This is a key Chapter 3 concept - moving from local to remote state
 terraform {
   backend "s3" {
+    # Unique path for this specific service's state file
+    # Pattern: environment/component-type/service-name/terraform.tfstate
     key            = "stage/services/webserver-cluster/terraform.tfstate"
-    region = "us-east-2"
-    dynamodb_table = "terraform-up-and-running-locks"
-    encrypt        = true
-    bucket         = "terraform-up-n-running-20250820"
+    
+    region         = "us-east-2"                              # AWS region for S3 bucket
+    dynamodb_table = "terraform-up-and-running-locks"        # DynamoDB table for state locking
+    encrypt        = true                                     # Encrypt state file at rest
+    bucket         = "terraform-up-n-running-20250820"       # S3 bucket name for state storage
+  }
+}
+
+# Reference remote state from the database component
+# This demonstrates state isolation - each component has its own state file
+# but can reference outputs from other components
+data "terraform_remote_state" "db" {
+  backend = "s3"
+  
+  config = {
+    bucket = "terraform-up-n-running-20250820"               # Same S3 bucket
+    key    = "stage/data-stores/mysql/terraform.tfstate"     # Path to database state file
+    region = "us-east-2"                                     # Same region
   }
 }
