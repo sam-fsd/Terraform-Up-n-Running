@@ -51,6 +51,8 @@ data "aws_subnets" "default" {
 
 # Auto Scaling Group to manage multiple instances
 resource "aws_autoscaling_group" "example" {
+  name = "${var.cluster_name}-asg"
+
   launch_template {
     id      = aws_launch_template.example.id
     version = "$Latest"
