@@ -16,7 +16,7 @@ resource "aws_launch_template" "example" {
   vpc_security_group_ids = [aws_security_group.instance.id]
 
   # Same startup script as the single instance with base64encoding(required for launch template)
-  user_data = base64encode(templatefile("user-data.sh", {
+  user_data = base64encode(templatefile("${path.module}/user-data.sh", {
     server_port = var.server_port
     db_address  = data.terraform_remote_state.db.outputs.address
     db_port     = data.terraform_remote_state.db.outputs.port
@@ -152,39 +152,29 @@ resource "aws_security_group" "instance" {
 
 # Security group for the Application Load Balancer
 resource "aws_security_group" "alb" {
-  name = "${var.cluster_name}-alb"
-
-  # Allow inbound HTTP requests from anywhere
-  ingress {
-    from_port   = local.http_port     # Standard HTTP port
-    to_port     = local.http_port
-    protocol    = local.tcp_protocol
-    cidr_blocks = local.all_ips  # Allow from any IP address
-  }
-
-  # Allow all outbound requests (needed for health checks)
-  egress {
-    from_port   = local.any_port            # All ports
-    to_port     = local.any_port
-    protocol    = local.any_protocol        # All protocols
-    cidr_blocks = local.all_ips  # To any IP address
-  }
+  name = "${var.cluster_name}-alb" 
 }
 
-# Configure Terraform to use S3 backend for remote state storage
-# This is a key Chapter 3 concept - moving from local to remote state
-terraform {
-  backend "s3" {
-    # Unique path for this specific service's state file
-    # Pattern: environment/component-type/service-name/terraform.tfstate
-    key            = "stage/services/webserver-cluster/terraform.tfstate"
-    
-    region         = "us-east-2"                              # AWS region for S3 bucket
-    dynamodb_table = "terraform-up-and-running-locks"        # DynamoDB table for state locking
-    encrypt        = true                                     # Encrypt state file at rest
-    bucket         = "terraform-up-n-running-20250820"       # S3 bucket name for state storage
-  }
+# Allow inbound HTTP requests from anywhere
+resource "aws_security_group_rule" "allow_http_inbound" {
+  type              = "ingress"
+  security_group_id = aws_security_group.alb.id
+  from_port         = local.http_port
+  to_port           = local.http_port
+  protocol          = local.tcp_protocol
+  cidr_blocks       = local.all_ips
 }
+
+# Allow all outbound requests (needed for health checks)
+resource "aws_security_group_rule" "allow_all_outbound" {
+  type              = "egress"
+  security_group_id = aws_security_group.alb.id
+  from_port         = local.any_port
+  to_port           = local.any_port
+  protocol          = local.any_protocol
+  cidr_blocks       = local.all_ips
+}
+
 
 # Reference remote state from the database component
 # This demonstrates state isolation - each component has its own state file
